@@ -566,6 +566,7 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   Widget build(BuildContext context) {
     final currentUserId = Supabase.instance.client.auth.currentUser!.id;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     String title = 'Чат';
     if (widget.room != null) {
@@ -599,6 +600,18 @@ class _ChatScreenState extends State<ChatScreen>
                 itemBuilder: (context, index) {
                   final message = _messages[index];
                   final isMe = message.userId == currentUserId;
+                  final incomingBubbleColor = isDark
+                      ? const Color(0xFF1F2937).withValues(alpha: 0.9)
+                      : Colors.white.withValues(alpha: 0.88);
+                  final incomingBorderColor = isDark
+                      ? Colors.white.withValues(alpha: 0.10)
+                      : Colors.black.withValues(alpha: 0.06);
+                  final incomingTextColor = isDark
+                      ? Theme.of(context).colorScheme.onSurface
+                      : const Color(0xFF1D1B20);
+                  final incomingMetaColor = isDark
+                      ? Colors.white70
+                      : Colors.black54;
                   final authorName =
                       message.user?.username ??
                       _userCache[message.userId]?.username ??
@@ -631,7 +644,7 @@ class _ChatScreenState extends State<ChatScreen>
                               : null,
                           color: isMe
                               ? null
-                              : Colors.white.withValues(alpha: 0.88),
+                              : incomingBubbleColor,
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(18),
                             topRight: const Radius.circular(18),
@@ -641,7 +654,7 @@ class _ChatScreenState extends State<ChatScreen>
                           border: Border.all(
                             color: isMe
                                 ? Colors.transparent
-                                : Colors.black.withValues(alpha: 0.06),
+                                : incomingBorderColor,
                           ),
                         ),
                         child: Column(
@@ -694,7 +707,9 @@ class _ChatScreenState extends State<ChatScreen>
                                 message.content,
                                 style: Theme.of(context).textTheme.bodyLarge
                                     ?.copyWith(
-                                      color: isMe ? Colors.white : null,
+                                      color: isMe
+                                          ? Colors.white
+                                          : incomingTextColor,
                                     ),
                               ),
                             const SizedBox(height: 4),
@@ -709,7 +724,7 @@ class _ChatScreenState extends State<ChatScreen>
                                             ? Colors.white.withValues(
                                                 alpha: 0.75,
                                               )
-                                            : Colors.black54,
+                                            : incomingMetaColor,
                                       ),
                                 ),
                                 if (isMe) const SizedBox(width: 4),
