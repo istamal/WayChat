@@ -19,4 +19,10 @@ class UserProfile {
       avatarUrl: json['avatar_url'],
     );
   }
+
+  String get displayNameOrUsername {
+    final name = fullName?.trim();
+    if (name != null && name.isNotEmpty) return name;
+    return username;
+  }
 }

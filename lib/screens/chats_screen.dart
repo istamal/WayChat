@@ -20,6 +20,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
   late Future<List<ChatRoom>> _roomsFuture;
   String _searchQuery = '';
 
+  bool _isValidNetworkUrl(String? value) {
+    if (value == null) return false;
+    final url = value.trim();
+    if (url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    return uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -34,6 +42,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) return const SizedBox.shrink();
+
     return Column(
       children: [
         Padding(
@@ -74,9 +85,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 itemCount: directRooms.length,
                 itemBuilder: (context, index) {
                   final room = directRooms[index];
-                  final user = room.getOtherParticipant(
-                    Supabase.instance.client.auth.currentUser!.id,
-                  );
+                  final user = room.getOtherParticipant(currentUserId);
                   return Padding(
                     padding: const EdgeInsets.only(right: 10),
                     child: InkWell(
@@ -94,14 +103,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         children: [
                           _buildAvatar(
                             user?.avatarUrl,
-                            user?.username,
+                            user?.displayNameOrUsername,
                             radius: 28,
                           ),
                           const SizedBox(height: 6),
                           SizedBox(
                             width: 64,
                             child: Text(
-                              user?.username ?? '?',
+                              user?.displayNameOrUsername ?? '?',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               textAlign: TextAlign.center,
@@ -133,14 +142,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   ? allRooms
                   : allRooms.where((r) {
                       final currentUserId =
-                          Supabase.instance.client.auth.currentUser!.id;
+                          Supabase.instance.client.auth.currentUser?.id;
+                      if (currentUserId == null) return false;
                       final roomNameMatch =
                           r.name?.toLowerCase().contains(_searchQuery) ?? false;
                       final directNameMatch =
                           r.isDirect &&
                           (r
                                   .getOtherParticipant(currentUserId)
-                                  ?.username
+                                  ?.displayNameOrUsername
                                   .toLowerCase()
                                   .contains(_searchQuery) ??
                               false);
@@ -193,7 +203,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   Widget _buildRoomTile(ChatRoom room) {
-    final currentUserId = Supabase.instance.client.auth.currentUser!.id;
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) return const SizedBox.shrink();
 
     String title;
     String subtitle;
@@ -202,7 +213,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
     if (room.isDirect) {
       final other = room.getOtherParticipant(currentUserId);
-      title = other?.username ?? 'Пользователь';
+      title = other?.displayNameOrUsername ?? 'Пользователь';
       subtitle = room.lastMessage?.content ?? 'Начните общение';
       avatarUrl = other?.avatarUrl;
     } else {
@@ -277,10 +288,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
     String? username, {
     double radius = 24,
   }) {
-    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+    if (_isValidNetworkUrl(avatarUrl)) {
       return CircleAvatar(
         radius: radius,
-        backgroundImage: NetworkImage(avatarUrl),
+        backgroundImage: NetworkImage(avatarUrl!.trim()),
       );
     }
 

@@ -15,14 +15,49 @@ class ProfileSetupScreen extends StatefulWidget {
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final _usernameController = TextEditingController();
+  final _displayNameController = TextEditingController();
   final ChatService _chatService = ChatService();
 
   bool _isLoading = false;
   String? _errorText;
   String? _avatarUrl;
 
+  bool _isValidNetworkUrl(String? value) {
+    if (value == null) return false;
+    final url = value.trim();
+    if (url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    return uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentProfile();
+  }
+
+  Future<void> _loadCurrentProfile() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('username, full_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (profile == null || !mounted) return;
+
+      setState(() {
+        _usernameController.text = (profile['username'] ?? '').toString();
+        _displayNameController.text = (profile['full_name'] ?? '').toString();
+        _avatarUrl = profile['avatar_url']?.toString();
+      });
+    } catch (_) {}
+  }
+
   Future<void> _saveProfile() async {
     final username = _usernameController.text.trim();
+    final displayName = _displayNameController.text.trim();
     if (username.isEmpty) {
       setState(() => _errorText = 'Введите имя пользователя');
       return;
@@ -43,11 +78,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       final existing = await Supabase.instance.client
           .from('profiles')
-          .select('username')
+          .select('id, username')
           .eq('username', username)
           .maybeSingle();
 
-      if (existing != null) {
+      if (existing != null && existing['id'] != user.id) {
         setState(() {
           _errorText = 'Имя пользователя уже занято';
           _isLoading = false;
@@ -57,7 +92,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       await Supabase.instance.client
           .from('profiles')
-          .update({'username': username, 'avatar_url': _avatarUrl})
+          .update({
+            'username': username,
+            'full_name': displayName.isEmpty ? null : displayName,
+            'avatar_url': _avatarUrl,
+          })
           .eq('id', user.id);
 
       if (!mounted) return;
@@ -76,6 +115,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _displayNameController.dispose();
+    super.dispose();
   }
 
   Future<void> _pickAvatar() async {
@@ -131,10 +177,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                             backgroundColor: Theme.of(
                               context,
                             ).colorScheme.primary.withValues(alpha: 0.12),
-                            backgroundImage: _avatarUrl != null
+                            backgroundImage: _isValidNetworkUrl(_avatarUrl)
                                 ? NetworkImage(_avatarUrl!)
                                 : null,
-                            child: _avatarUrl == null
+                            child: !_isValidNetworkUrl(_avatarUrl)
                                 ? const Icon(Icons.person_rounded, size: 50)
                                 : null,
                           ),
@@ -180,6 +226,16 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       prefixIcon: const Icon(Icons.alternate_email_rounded),
                       labelText: 'Имя пользователя',
                       errorText: _errorText,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _displayNameController,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.badge_rounded),
+                      labelText: 'Имя в чате',
+                      hintText: 'Например: Давид А.',
                     ),
                   ),
                   const SizedBox(height: 18),

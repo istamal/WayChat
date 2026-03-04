@@ -57,6 +57,14 @@ class _ChatScreenState extends State<ChatScreen>
 
   final Map<String, UserProfile> _userCache = {};
 
+  bool _isValidNetworkUrl(String? value) {
+    if (value == null) return false;
+    final url = value.trim();
+    if (url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    return uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -203,7 +211,8 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    final userId = Supabase.instance.client.auth.currentUser!.id;
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
     String? imageUrl;
     String? voiceUrl;
 
@@ -565,14 +574,15 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   Widget build(BuildContext context) {
-    final currentUserId = Supabase.instance.client.auth.currentUser!.id;
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) return const SizedBox.shrink();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     String title = 'Чат';
     if (widget.room != null) {
       if (widget.room!.isDirect) {
         final other = widget.room!.getOtherParticipant(currentUserId);
-        title = other?.username ?? 'Собеседник';
+        title = other?.displayNameOrUsername ?? 'Собеседник';
       } else {
         title = widget.room!.name ?? 'Группа';
       }
@@ -613,8 +623,8 @@ class _ChatScreenState extends State<ChatScreen>
                       ? Colors.white70
                       : Colors.black54;
                   final authorName =
-                      message.user?.username ??
-                      _userCache[message.userId]?.username ??
+                      message.user?.displayNameOrUsername ??
+                      _userCache[message.userId]?.displayNameOrUsername ??
                       'Пользователь';
 
                   return Align(
@@ -669,14 +679,13 @@ class _ChatScreenState extends State<ChatScreen>
                                       ?.copyWith(fontWeight: FontWeight.w700),
                                 ),
                               ),
-                            if (message.imageUrl != null &&
-                                message.imageUrl!.isNotEmpty)
+                            if (_isValidNetworkUrl(message.imageUrl))
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(14),
                                   child: Image.network(
-                                    message.imageUrl!,
+                                    message.imageUrl!.trim(),
                                     fit: BoxFit.cover,
                                     errorBuilder:
                                         (context, error, stackTrace) =>

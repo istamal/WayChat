@@ -23,6 +23,19 @@ class _NewChatScreenState extends State<NewChatScreen> {
   bool _isSearching = false;
   bool _isCreatingGroup = false;
 
+  bool _isValidNetworkUrl(String? value) {
+    if (value == null) return false;
+    final url = value.trim();
+    if (url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    return uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+  }
+
+  String _asMention(String username) {
+    if (username.startsWith('@')) return username;
+    return '@$username';
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -41,7 +54,15 @@ class _NewChatScreenState extends State<NewChatScreen> {
 
     setState(() => _isSearching = true);
     final results = await _chatService.searchUsers(query);
-    final currentUserId = Supabase.instance.client.auth.currentUser!.id;
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) {
+      if (!mounted) return;
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
+    }
     results.removeWhere((user) => user.id == currentUserId);
 
     setState(() {
@@ -137,7 +158,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
                       decoration: InputDecoration(
                         hintText: _isCreatingGroup
                             ? 'Найти участников'
-                            : 'Найти по username',
+                            : 'Найти по @username',
                         prefixIcon: const Icon(Icons.search_rounded),
                       ),
                     ),
@@ -157,7 +178,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: Chip(
-                        label: Text(user.username),
+                        label: Text(user.displayNameOrUsername),
                         onDeleted: () => _toggleSelectUser(user),
                         avatar: CircleAvatar(
                           backgroundColor: Theme.of(
@@ -195,23 +216,32 @@ class _NewChatScreenState extends State<NewChatScreen> {
                                 backgroundColor: Theme.of(
                                   context,
                                 ).colorScheme.primary.withValues(alpha: 0.2),
-                                backgroundImage:
-                                    (user.avatarUrl != null &&
-                                        user.avatarUrl!.isNotEmpty)
-                                    ? NetworkImage(user.avatarUrl!)
+                                backgroundImage: _isValidNetworkUrl(
+                                  user.avatarUrl,
+                                )
+                                    ? NetworkImage(user.avatarUrl!.trim())
                                     : null,
                                 child:
-                                    (user.avatarUrl == null ||
-                                        user.avatarUrl!.isEmpty)
+                                    !_isValidNetworkUrl(user.avatarUrl)
                                     ? Text(
-                                        user.username
+                                        user.displayNameOrUsername
                                             .substring(0, 1)
                                             .toUpperCase(),
                                       )
                                     : null,
                               ),
-                              title: Text(user.username),
-                              subtitle: Text(user.fullName ?? ''),
+                              title: Text(
+                                user.displayNameOrUsername,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              subtitle: Text(
+                                _asMention(user.username),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
                               trailing: _isCreatingGroup
                                   ? Icon(
                                       isSelected
