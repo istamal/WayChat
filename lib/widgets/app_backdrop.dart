@@ -17,6 +17,7 @@ class AppBackdrop extends StatelessWidget {
         : const [AppTheme.bgTop, AppTheme.bgBottom];
 
     return Container(
+      constraints: const BoxConstraints.expand(),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -25,6 +26,7 @@ class AppBackdrop extends StatelessWidget {
         ),
       ),
       child: Stack(
+        fit: StackFit.expand,
         children: [
           Positioned(
             top: -120,
