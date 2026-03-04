@@ -31,7 +31,9 @@ class _ChatScreenState extends State<ChatScreen>
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  late Stream<List<Message>> _messagesStream;
+  StreamSubscription<List<Message>>? _messagesSubscription;
+  Timer? _messagesPollingTimer;
+  bool _isPollingFallbackActive = false;
   List<Message> _messages = [];
 
   Uint8List? _pendingImageBytes;
@@ -51,6 +53,7 @@ class _ChatScreenState extends State<ChatScreen>
   bool _isPlaying = false;
   bool _isDraftPlaying = false;
   bool _holdCancelTriggered = false;
+  final Set<String> _readReceiptSyncedIds = <String>{};
 
   final Map<String, UserProfile> _userCache = {};
 
@@ -80,15 +83,81 @@ class _ChatScreenState extends State<ChatScreen>
       });
     });
 
-    _messagesStream = _chatService.subscribeToMessages(widget.roomId);
-    _messagesStream.listen((messages) async {
-      messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      if (mounted) {
-        setState(() => _messages = messages);
-      }
-      await _ensureUserProfiles(messages);
-      _scrollToBottom();
+    _startMessagesRealtimeSubscription();
+  }
+
+  void _startMessagesRealtimeSubscription() {
+    _messagesSubscription?.cancel();
+    _messagesSubscription = _chatService.subscribeToMessages(widget.roomId).listen(
+      (messages) async {
+        await _handleIncomingMessages(messages);
+      },
+      onError: (error, stackTrace) async {
+        print('Realtime messages subscription error: $error');
+        if (!mounted) return;
+        _startMessagesPollingFallback();
+      },
+      cancelOnError: false,
+    );
+  }
+
+  void _startMessagesPollingFallback() {
+    if (_isPollingFallbackActive) return;
+    _isPollingFallbackActive = true;
+    _messagesPollingTimer?.cancel();
+
+    _pollMessagesOnce();
+    _messagesPollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _pollMessagesOnce();
     });
+  }
+
+  Future<void> _pollMessagesOnce() async {
+    if (!mounted) return;
+    try {
+      final messages = await _chatService.getMessages(widget.roomId);
+      await _handleIncomingMessages(messages);
+    } catch (e) {
+      print('Polling messages error: $e');
+    }
+  }
+
+  Future<void> _handleIncomingMessages(List<Message> messages) async {
+    messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    if (mounted) {
+      setState(() => _messages = messages);
+    }
+    await _ensureUserProfiles(messages);
+    await _markIncomingMessagesAsRead(messages);
+    _scrollToBottom();
+  }
+
+  Future<void> _markIncomingMessagesAsRead(List<Message> messages) async {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) return;
+
+    final unreadIncomingIds = messages
+        .where(
+          (m) =>
+              m.userId != currentUserId &&
+              m.readAt == null &&
+              !_readReceiptSyncedIds.contains(m.id),
+        )
+        .map((m) => m.id)
+        .toList();
+
+    if (unreadIncomingIds.isEmpty) return;
+
+    _readReceiptSyncedIds.addAll(unreadIncomingIds);
+    try {
+      await _chatService.markMessagesAsRead(
+        widget.roomId,
+        messageIds: unreadIncomingIds,
+      );
+    } catch (e) {
+      _readReceiptSyncedIds.removeAll(unreadIncomingIds);
+      print('Error marking messages as read: $e');
+    }
   }
 
   Future<void> _ensureUserProfiles(List<Message> messages) async {
@@ -364,6 +433,12 @@ class _ChatScreenState extends State<ChatScreen>
     return '$minutes:$seconds';
   }
 
+  String _formatMessageTime(DateTime dateTime) {
+    final hours = dateTime.hour.toString().padLeft(2, '0');
+    final minutes = dateTime.minute.toString().padLeft(2, '0');
+    return '$hours:$minutes';
+  }
+
   String _getTempPath() {
     if (Platform.isAndroid) return '/data/user/0/com.example.waychat/cache';
     return '/tmp';
@@ -622,6 +697,48 @@ class _ChatScreenState extends State<ChatScreen>
                                       color: isMe ? Colors.white : null,
                                     ),
                               ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _formatMessageTime(message.createdAt),
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: isMe
+                                            ? Colors.white.withValues(
+                                                alpha: 0.75,
+                                              )
+                                            : Colors.black54,
+                                      ),
+                                ),
+                                if (isMe) const SizedBox(width: 4),
+                                if (isMe)
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.done_rounded,
+                                        size: 14,
+                                        color: message.readAt != null
+                                            ? const Color(0xFF81D4FA)
+                                            : Colors.white.withValues(
+                                                alpha: 0.75,
+                                              ),
+                                      ),
+                                      if (message.readAt != null)
+                                        const Padding(
+                                          padding: EdgeInsets.only(left: 0.2),
+                                          child: Icon(
+                                            Icons.done_rounded,
+                                            size: 14,
+                                            color: Color(0xFF81D4FA),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -957,6 +1074,8 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void dispose() {
     _recordTimer?.cancel();
+    _messagesSubscription?.cancel();
+    _messagesPollingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _audioRecorder.dispose();

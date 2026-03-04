@@ -6,6 +6,7 @@ class Message {
   final String userId;
   final String content;
   final DateTime createdAt;
+  final DateTime? readAt;
   final UserProfile? user; // опционально, для отображения автора
   final String? imageUrl;
   final String? voiceUrl;
@@ -16,6 +17,7 @@ class Message {
     required this.userId,
     required this.content,
     required this.createdAt,
+    this.readAt,
     this.user,
     this.imageUrl,
     this.voiceUrl,
@@ -41,6 +43,9 @@ class Message {
       userId: json['user_id'],
       content: json['content'],
       createdAt: DateTime.parse(json['created_at']),
+      readAt: json['read_at'] != null
+          ? DateTime.tryParse(json['read_at'].toString())
+          : null,
       user: json['user'] != null ? UserProfile.fromJson(json['user']) : null,
       imageUrl: normalizeUrl(json['image_url']),
       voiceUrl: normalizeUrl(json['voice_url']),

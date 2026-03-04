@@ -260,6 +260,38 @@ class ChatService {
         .map((maps) => maps.map(Message.fromJson).toList());
   }
 
+  // Получить сообщения комнаты без realtime (fallback)
+  Future<List<Message>> getMessages(String roomId) async {
+    final rows = await _client
+        .from('messages')
+        .select()
+        .eq('room_id', roomId)
+        .order('created_at', ascending: true);
+    return rows.map(Message.fromJson).toList();
+  }
+
+  // Отметить входящие сообщения в комнате как прочитанные
+  Future<void> markMessagesAsRead(
+    String roomId, {
+    List<String>? messageIds,
+  }) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) throw Exception('Not authenticated');
+
+    var query = _client
+        .from('messages')
+        .update({'read_at': DateTime.now().toIso8601String()})
+        .eq('room_id', roomId)
+        .neq('user_id', userId)
+        .isFilter('read_at', null);
+
+    if (messageIds != null && messageIds.isNotEmpty) {
+      query = query.inFilter('id', messageIds);
+    }
+
+    await query;
+  }
+
   // Поиск пользователей по username (ILIKE)
   Future<List<UserProfile>> searchUsers(String query) async {
     if (query.isEmpty) return [];
