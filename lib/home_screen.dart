@@ -4,6 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'profile_setup_screen.dart';
 import 'screens/chats_screen.dart';
 import 'screens/new_chat_screen.dart';
+import 'services/push_notification_service.dart';
+import 'services/unread_counter_service.dart';
 import 'theme/theme_controller.dart';
 import 'widgets/app_backdrop.dart';
 
@@ -23,6 +25,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _checkProfile();
+    UnreadCounterService.instance.start();
+    PushNotificationService.instance.syncTokenForCurrentUser();
   }
 
   Future<void> _checkProfile() async {
@@ -66,7 +70,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('WayChat'),
+            title: ValueListenableBuilder<int>(
+              valueListenable: UnreadCounterService.instance.totalUnread,
+              builder: (context, totalUnread, _) {
+                if (totalUnread <= 0) return const Text('WayChat');
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('WayChat'),
+                    const SizedBox(width: 8),
+                    Badge(label: Text(totalUnread.toString())),
+                  ],
+                );
+              },
+            ),
             actions: [
               IconButton(
                 icon: Icon(
@@ -116,13 +133,33 @@ class _HomeScreenState extends State<HomeScreen> {
               }
               setState(() => _currentIndex = index);
             },
-            destinations: const [
+            destinations: [
               NavigationDestination(
-                icon: Icon(Icons.chat_bubble_outline_rounded),
-                selectedIcon: Icon(Icons.chat_bubble_rounded),
+                icon: ValueListenableBuilder<int>(
+                  valueListenable: UnreadCounterService.instance.totalUnread,
+                  builder: (context, totalUnread, _) {
+                    final icon = const Icon(Icons.chat_bubble_outline_rounded);
+                    if (totalUnread <= 0) return icon;
+                    return Badge(
+                      label: Text(totalUnread.toString()),
+                      child: icon,
+                    );
+                  },
+                ),
+                selectedIcon: ValueListenableBuilder<int>(
+                  valueListenable: UnreadCounterService.instance.totalUnread,
+                  builder: (context, totalUnread, _) {
+                    final icon = const Icon(Icons.chat_bubble_rounded);
+                    if (totalUnread <= 0) return icon;
+                    return Badge(
+                      label: Text(totalUnread.toString()),
+                      child: icon,
+                    );
+                  },
+                ),
                 label: 'Чаты',
               ),
-              NavigationDestination(
+              const NavigationDestination(
                 icon: Icon(Icons.person_outline_rounded),
                 selectedIcon: Icon(Icons.person_rounded),
                 label: 'Профиль',
@@ -132,5 +169,11 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
+  }
+
+  @override
+  void dispose() {
+    UnreadCounterService.instance.stop();
+    super.dispose();
   }
 }

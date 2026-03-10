@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'app_config.dart';
+import 'services/push_notification_service.dart';
 import 'splash_screen.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
@@ -8,13 +11,17 @@ import 'theme/theme_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  try {
+    await dotenv.load(fileName: '.env', isOptional: true);
+  } catch (_) {}
+
   await Supabase.initialize(
-    url: 'https://rtlgrqbyuwepieykfxpx.supabase.co',
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0bGdycWJ5dXdlcGlleWtmeHB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyNzQ0NTgsImV4cCI6MjA4Nzg1MDQ1OH0.ukMnTA4GxkwqGa0FFtzctSnbsI-oZTD5LFkg01t4Mj8',
+    url: AppConfig.supabaseUrlRequired,
+    anonKey: AppConfig.supabaseAnonKeyRequired,
   );
 
   await ThemeController.instance.load();
+  await PushNotificationService.instance.initialize();
 
   runApp(const MyApp());
 }

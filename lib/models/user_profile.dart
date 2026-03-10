@@ -3,12 +3,14 @@ class UserProfile {
   final String username;
   final String? fullName;
   final String? avatarUrl;
+  final bool? isOnline;
 
   UserProfile({
     required this.id,
     required this.username,
     this.fullName,
     this.avatarUrl,
+    this.isOnline,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -17,6 +19,7 @@ class UserProfile {
       username: json['username'],
       fullName: json['full_name'],
       avatarUrl: json['avatar_url'],
+      isOnline: json['is_online'] ?? json['online'],
     );
   }
 

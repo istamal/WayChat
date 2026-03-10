@@ -147,6 +147,19 @@ class ChatService {
     return roomId;
   }
 
+  Future<List<UserProfile>> getRoomParticipants(String roomId) async {
+    final participantsData = await _client
+        .from('chat_room_participants')
+        .select('user_id, profiles!inner(*)')
+        .eq('room_id', roomId);
+
+    List<UserProfile> participants = [];
+    for (var p in participantsData) {
+      participants.add(UserProfile.fromJson(p['profiles']));
+    }
+    return participants;
+  }
+
   // Создать групповую комнату
   Future<String> createGroupRoom(
     String name,

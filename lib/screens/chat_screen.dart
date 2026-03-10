@@ -56,6 +56,13 @@ class _ChatScreenState extends State<ChatScreen>
   final Set<String> _readReceiptSyncedIds = <String>{};
 
   final Map<String, UserProfile> _userCache = {};
+  UserProfile? _directUser;
+  bool? _isDirectRoom;
+  String? _roomName;
+  bool? _roomIsPrivate;
+  StreamSubscription<List<Map<String, dynamic>>>? _presenceSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _presenceListSubscription;
+  Map<String, bool> _presenceByUserId = <String, bool>{};
 
   bool _isValidNetworkUrl(String? value) {
     if (value == null) return false;
@@ -74,6 +81,9 @@ class _ChatScreenState extends State<ChatScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat();
+    _isDirectRoom = widget.room?.isDirect;
+    _roomName = widget.room?.name;
+    _roomIsPrivate = widget.room?.isPrivate;
 
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (!mounted) return;
@@ -91,7 +101,78 @@ class _ChatScreenState extends State<ChatScreen>
       });
     });
 
+    _initDirectUser();
     _startMessagesRealtimeSubscription();
+  }
+
+  Future<void> _initDirectUser() async {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) return;
+
+    if (widget.room?.isDirect == true) {
+      final other = widget.room!.getOtherParticipant(currentUserId);
+      if (other != null) {
+        _isDirectRoom = true;
+        _setDirectUser(other);
+        _subscribeToPresence(other.id);
+        return;
+      }
+    }
+
+    try {
+      if (widget.room == null) {
+        final roomData = await Supabase.instance.client
+            .from('chat_rooms')
+            .select('name, is_private')
+            .eq('id', widget.roomId)
+            .maybeSingle();
+        if (roomData != null) {
+          _roomName = roomData['name']?.toString();
+          _roomIsPrivate = roomData['is_private'] == true;
+        }
+      }
+
+      final participants = await _chatService.getRoomParticipants(widget.roomId);
+      if (!mounted) return;
+      final isDirect =
+          (_roomIsPrivate == true) && participants.length == 2;
+      if (isDirect) {
+        _isDirectRoom = true;
+        final other = participants.firstWhere(
+          (p) => p.id != currentUserId,
+          orElse: () => participants.first,
+        );
+        _setDirectUser(other);
+        _subscribeToPresence(other.id);
+      } else {
+        _isDirectRoom = false;
+        _setDirectUser(null);
+      }
+    } catch (e) {
+      print('Failed to load room participants: $e');
+    }
+  }
+
+  void _setDirectUser(UserProfile? user) {
+    if (!mounted) return;
+    setState(() => _directUser = user);
+  }
+
+  void _subscribeToPresence(String userId) {
+    _presenceSubscription?.cancel();
+    _presenceSubscription = Supabase.instance.client
+        .from('profiles')
+        .stream(primaryKey: ['id'])
+        .eq('id', userId)
+        .listen(
+          (rows) {
+            if (!mounted || rows.isEmpty) return;
+            setState(() => _directUser = UserProfile.fromJson(rows.first));
+          },
+          onError: (error) {
+            print('Presence stream error: $error');
+          },
+        );
   }
 
   void _startMessagesRealtimeSubscription() {
@@ -136,8 +217,43 @@ class _ChatScreenState extends State<ChatScreen>
       setState(() => _messages = messages);
     }
     await _ensureUserProfiles(messages);
+    _ensurePresenceForMessages(messages);
     await _markIncomingMessagesAsRead(messages);
     _scrollToBottom();
+  }
+
+  void _ensurePresenceForMessages(List<Message> messages) {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) return;
+
+    final ids = messages
+        .map((m) => m.userId)
+        .where((id) => id != currentUserId)
+        .toSet();
+
+    if (ids.isEmpty) return;
+
+    _presenceListSubscription?.cancel();
+    _presenceListSubscription = Supabase.instance.client
+        .from('profiles')
+        .stream(primaryKey: ['id'])
+        .inFilter('id', ids.toList())
+        .listen(
+          (rows) {
+            if (!mounted || rows.isEmpty) return;
+            final next = Map<String, bool>.from(_presenceByUserId);
+            for (final row in rows) {
+              final id = row['id']?.toString();
+              if (id == null || id.isEmpty) continue;
+              final isOnline = row['is_online'] == true || row['online'] == true;
+              next[id] = isOnline;
+            }
+            setState(() => _presenceByUserId = next);
+          },
+          onError: (error) {
+            print('Presence list stream error: $error');
+          },
+        );
   }
 
   Future<void> _markIncomingMessagesAsRead(List<Message> messages) async {
@@ -577,6 +693,8 @@ class _ChatScreenState extends State<ChatScreen>
     final currentUserId = Supabase.instance.client.auth.currentUser?.id;
     if (currentUserId == null) return const SizedBox.shrink();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final directUser = _directUser;
+    final isDirectRoom = _isDirectRoom == true;
 
     String title = 'Чат';
     if (widget.room != null) {
@@ -586,11 +704,26 @@ class _ChatScreenState extends State<ChatScreen>
       } else {
         title = widget.room!.name ?? 'Группа';
       }
+    } else if (!isDirectRoom) {
+      title = _roomName ?? 'Группа';
+    }
+    if (directUser != null && isDirectRoom) {
+      title = directUser.displayNameOrUsername;
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(title),
+        title: (directUser == null || !isDirectRoom)
+            ? Text(title)
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title),
+                  const SizedBox(height: 2),
+                  _PresenceIndicator(isOnline: directUser.isOnline == true),
+                ],
+              ),
         actions: [
           IconButton(
             tooltip: 'Вложение',
@@ -626,6 +759,8 @@ class _ChatScreenState extends State<ChatScreen>
                       message.user?.displayNameOrUsername ??
                       _userCache[message.userId]?.displayNameOrUsername ??
                       'Пользователь';
+                  final authorOnline =
+                      _presenceByUserId[message.userId] == true;
 
                   return Align(
                     alignment: isMe
@@ -673,10 +808,24 @@ class _ChatScreenState extends State<ChatScreen>
                             if (!isMe)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 4),
-                                child: Text(
-                                  authorName,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _PresenceDot(
+                                      isOnline: authorOnline,
+                                      size: 8,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      authorName,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             if (_isValidNetworkUrl(message.imageUrl))
@@ -1100,11 +1249,70 @@ class _ChatScreenState extends State<ChatScreen>
     _recordTimer?.cancel();
     _messagesSubscription?.cancel();
     _messagesPollingTimer?.cancel();
+    _presenceSubscription?.cancel();
+    _presenceListSubscription?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
     _eqController.dispose();
     super.dispose();
+  }
+}
+
+class _PresenceIndicator extends StatelessWidget {
+  final bool isOnline;
+
+  const _PresenceIndicator({required this.isOnline});
+
+  @override
+  Widget build(BuildContext context) {
+    final dotColor = isOnline ? const Color(0xFF16A34A) : Colors.grey;
+    final textColor = isOnline
+        ? dotColor
+        : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
+    final label = isOnline ? 'Online' : 'Offline';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: dotColor,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: textColor,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PresenceDot extends StatelessWidget {
+  final bool isOnline;
+  final double size;
+
+  const _PresenceDot({required this.isOnline, this.size = 8});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isOnline ? const Color(0xFF16A34A) : Colors.grey;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+    );
   }
 }

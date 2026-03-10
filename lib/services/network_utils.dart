@@ -1,7 +1,9 @@
 import 'dart:io';
 
+import '../app_config.dart';
+
 class NetworkUtils {
-  static const String supabaseHost = 'rtlgrqbyuwepieykfxpx.supabase.co';
+  static String get supabaseHost => AppConfig.supabaseHostRequired;
 
   static Future<bool> canResolveSupabase({
     Duration timeout = const Duration(seconds: 3),
